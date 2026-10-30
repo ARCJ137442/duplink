@@ -1,0 +1,22 @@
+[package]
+name = "duplink"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4.4", features = ["derive"] }   # 命令行参数解析
+anyhow = "1.0"                                     # 错误上下文
+rayon = "1.10"                                     # 并行哈希
+walkdir = "2.4"                                    # 目录遍历
+glob = "0.3"                                       # 排除路径匹配
+sha2 = "0.10"                                      # 内容摘要
+serde = { version = "1.0", features = ["derive"] }  # JSON 报告
+serde_json = "1.0"
+indicatif = "0.18"                                 # 扫描/哈希进度条
+console = "0.16"                                   # 终端着色
+same-file = "1.0"                                  # 跨平台文件身份（硬链接判据）
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true
