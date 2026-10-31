@@ -2,7 +2,7 @@
 //!
 //! 📌【2026-10-30】本文件是薄编排层：按"扫描 → 摘要 → 分组 → 报告 → 确认 → 转换 → 复核"
 //! 的固定顺序调用各阶段模块，不包含算法细节。所有破坏性副作用集中在 `link` 模块，
-//! 所有人类可读输出集中在 `report` 模块。
+//! 所有人类可读输出集中在 `report` 模块，退出行为集中在 `terminal` 模块。
 
 mod cli;
 mod confirm;
@@ -13,6 +13,7 @@ mod model;
 mod platform;
 mod report;
 mod scan;
+mod terminal;
 
 use std::collections::BTreeMap;
 use std::io::{self, Write};
@@ -27,22 +28,69 @@ use indicatif::{ProgressBar, ProgressStyle};
 
 use cli::Args;
 use model::human_size;
+use terminal::ExitKind;
 
 /// 部分处理失败时的退出码：区分"整体失败"与"完成但有例外"。
 const EXIT_PARTIAL: u8 = 2;
 
-fn main() -> ExitCode {
-    match run() {
-        Ok(code) => code,
-        Err(error) => {
-            eprintln!("{} {error:#}", style("错误：").red().bold());
-            ExitCode::FAILURE
-        }
-    }
+/// 一次运行的结局。
+struct Outcome {
+    code: ExitCode,
+    /// 是否以错误或部分失败告终——决定退出前是否保留窗口。
+    failed: bool,
 }
 
-fn run() -> Result<ExitCode> {
-    let args = Args::parse();
+fn main() -> ExitCode {
+    // 先装 panic 钩子：任何未预期的崩溃都要给出可读诊断，而不是静默消失。
+    terminal::install_panic_hook();
+
+    let raw_args: Vec<String> = std::env::args().collect();
+    terminal::record_launch_arguments(&raw_args);
+    let bare_launch = terminal::launched_without_arguments(&raw_args);
+
+    // 📌【2026-10-30】不用 `Args::parse()`：它在 --help/--version 与参数错误时直接
+    // 调用 `std::process::exit`，会绕过下面的退出等待，双击运行时窗口照旧一闪而过。
+    let args = match Args::try_parse() {
+        Ok(args) => args,
+        Err(error) => {
+            let kind = match error.kind() {
+                clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::DisplayVersion => {
+                    ExitKind::Informational
+                }
+                _ => ExitKind::Failure,
+            };
+            let _ = error.print();
+            terminal::wait_before_exit(kind, bare_launch);
+            std::process::exit(if kind == ExitKind::Informational {
+                0
+            } else {
+                2
+            });
+        }
+    };
+
+    let (code, failed) = match run(args) {
+        Ok(outcome) => (outcome.code, outcome.failed),
+        Err(error) => {
+            eprintln!();
+            eprintln!("{} {error:#}", style("错误：").red().bold());
+            (ExitCode::FAILURE, true)
+        }
+    };
+
+    // 双击运行时控制台窗口会随进程消失，这里等用户看完再关。
+    terminal::wait_before_exit(
+        if failed {
+            ExitKind::Failure
+        } else {
+            ExitKind::Success
+        },
+        bare_launch,
+    );
+    code
+}
+
+fn run(args: Args) -> Result<Outcome> {
     let root = resolve_root(args.path.as_deref())?;
     if !root.is_dir() {
         anyhow::bail!("扫描根目录不存在或不是目录: {}", root.display());
@@ -195,7 +243,10 @@ fn run() -> Result<ExitCode> {
                 None,
             )?;
         }
-        return Ok(ExitCode::SUCCESS);
+        return Ok(Outcome {
+            code: ExitCode::SUCCESS,
+            failed: false,
+        });
     }
 
     // ── 阶段五：用户确认 ────────────────────────────────────────
@@ -218,7 +269,10 @@ fn run() -> Result<ExitCode> {
                 None,
             )?;
         }
-        return Ok(ExitCode::SUCCESS);
+        return Ok(Outcome {
+            code: ExitCode::SUCCESS,
+            failed: false,
+        });
     }
 
     // ── 阶段六：转换为硬链接 ────────────────────────────────────
@@ -327,10 +381,13 @@ fn run() -> Result<ExitCode> {
         )?;
     }
 
-    Ok(if has_failures {
-        ExitCode::from(EXIT_PARTIAL)
-    } else {
-        ExitCode::SUCCESS
+    Ok(Outcome {
+        code: if has_failures {
+            ExitCode::from(EXIT_PARTIAL)
+        } else {
+            ExitCode::SUCCESS
+        },
+        failed: has_failures,
     })
 }
 
