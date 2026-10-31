@@ -64,9 +64,10 @@ after:   /Music/特殊/歌.flac        64 MB  ┐
 ### 1. 拿一个可执行文件
 
 **Windows**：从 [Releases](https://github.com/ARCJ137442/duplink/releases/latest) 下载
-`duplink.exe`，单文件，无需安装、无需任何依赖。
+`duplink-windows-x86_64.exe`（改名成 `duplink.exe` 也行），单文件，无需安装、无需任何依赖。
 
-**macOS / Linux**：从源码编译（见下一节），产物在 `target/release/duplink`。
+**Linux / macOS**：同一页面上有 `duplink-linux-x86_64` 与 `duplink-macos-arm64`；
+也可以从源码编译（见下一节），产物在 `target/release/duplink`。
 
 ### 2. 先预览，不改任何东西
 
