@@ -8,7 +8,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use crate::model::{has_copy_marker, Digest, DuplicateGroup, FileEntry};
+use crate::model::{has_copy_marker, is_in_temporary_directory, Digest, DuplicateGroup, FileEntry};
 use crate::platform;
 
 /// 选出需要计算摘要的候选文件下标。
@@ -30,13 +30,15 @@ pub fn candidate_indices(entries: &[FileEntry]) -> Vec<usize> {
 /// 主副本优先级比较：返回 `Less` 表示 `a` 更适合当主副本。
 ///
 /// 规则依次为：
-/// 1. 没有 `(1)` 这类副本标记的路径优先——它是用户看到的"原名"；
-/// 2. 修改时间更早的优先——保留"最初那份"的语义；
-/// 3. 路径更短的优先；
-/// 4. 路径字典序——保证同一批文件每次都得到相同结果。
+/// 1. 不在临时/工作目录里的优先——主副本要放在用户真正会打开的目录里；
+/// 2. 没有 `(1)` 这类副本标记的路径优先——它是用户看到的"原名"；
+/// 3. 修改时间更早的优先——保留"最初那份"的语义；
+/// 4. 路径更短的优先；
+/// 5. 路径字典序——保证同一批文件每次都得到相同结果。
 fn keeper_cmp(a: &FileEntry, b: &FileEntry) -> Ordering {
-    has_copy_marker(&a.name())
-        .cmp(&has_copy_marker(&b.name()))
+    is_in_temporary_directory(&a.path)
+        .cmp(&is_in_temporary_directory(&b.path))
+        .then_with(|| has_copy_marker(&a.name()).cmp(&has_copy_marker(&b.name())))
         .then_with(|| a.modified.cmp(&b.modified))
         .then_with(|| a.path.as_os_str().len().cmp(&b.path.as_os_str().len()))
         .then_with(|| a.path.as_os_str().cmp(b.path.as_os_str()))
@@ -124,6 +126,14 @@ mod tests {
         let older = entry("a.pdf", 10, 50);
         let newer = entry("b.pdf", 10, 100);
         assert_eq!(keeper_cmp(&older, &newer), Ordering::Less);
+    }
+
+    #[test]
+    fn keeper_prefers_real_directory_over_temporary_one() {
+        let temporary = entry(".agents/work/a.mp3", 10, 10);
+        let real = entry("CloudMusic/b.mp3", 10, 999);
+        // 即使临时目录那份修改时间更早、名字也更"干净"，主副本仍应留在真实目录。
+        assert_eq!(keeper_cmp(&real, &temporary), Ordering::Less);
     }
 
     #[test]

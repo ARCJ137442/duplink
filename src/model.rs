@@ -132,6 +132,37 @@ pub fn is_editable(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// 这些目录名出现在路径中时，该文件被视为"临时副本"。
+///
+/// 📌【2026-10-30】主副本应当优先留在真实目录里：agent 工作区、缓存、回收站这类目录
+/// 随时可能被清理，主副本放在那里等于把数据的存活挂在临时目录上。
+/// 副本内容完全相同，所以换个路径承载数据不会损失任何东西。
+const TEMPORARY_DIRECTORY_SEGMENTS: &[&str] = &[
+    ".agents",
+    "temp",
+    "tmp",
+    ".tmp",
+    ".cache",
+    "cache",
+    "scratch",
+    "trash",
+    "$recycle.bin",
+];
+
+/// 判断路径是否位于临时/工作目录中。
+pub fn is_in_temporary_directory(path: &Path) -> bool {
+    path.components().any(|component| {
+        component
+            .as_os_str()
+            .to_str()
+            .map(|segment| {
+                let lowered = segment.to_ascii_lowercase();
+                TEMPORARY_DIRECTORY_SEGMENTS.contains(&lowered.as_str())
+            })
+            .unwrap_or(false)
+    })
+}
+
 /// 文件名是否带有 `(1)`、`(2)` 这类副本标记。
 ///
 /// 微信收到同名文件时会自动追加编号，`foo(1).pdf` 是 `foo.pdf` 的副本。
@@ -244,6 +275,24 @@ mod tests {
         assert!(is_editable(Path::new("a.rs")));
         assert!(!is_editable(Path::new("a.pdf")));
         assert!(!is_editable(Path::new("a")));
+    }
+
+    #[test]
+    fn temporary_directories_are_detected_by_segment() {
+        assert!(is_in_temporary_directory(Path::new(
+            "C:/x/.agents/work/ambiguous/a.mp3"
+        )));
+        assert!(is_in_temporary_directory(Path::new("C:/x/Temp/a.mp3")));
+        assert!(is_in_temporary_directory(Path::new(
+            "C:/x/CloudMusic/cache/a.mp3"
+        )));
+        // 只是名字里含有这些字样，不算临时目录
+        assert!(!is_in_temporary_directory(Path::new(
+            "C:/x/CloudMusic/temporary-mix/a.mp3"
+        )));
+        assert!(!is_in_temporary_directory(Path::new(
+            "C:/x/CloudMusic/特殊/a.mp3"
+        )));
     }
 
     #[test]

@@ -11,6 +11,7 @@ use console::style;
 use serde::Serialize;
 
 use crate::model::{human_size, is_editable, DuplicateGroup};
+use crate::scan;
 
 /// 尽量显示相对根目录的短路径。
 pub fn short_path(root: &Path, path: &Path) -> String {
@@ -53,6 +54,14 @@ pub struct ExecutionReport {
     pub failures: Vec<FailureReport>,
 }
 
+/// 被跳过的 reparse point（JSON 表示）。
+#[derive(Serialize)]
+pub struct ReparsePointReport {
+    pub path: String,
+    pub target: Option<String>,
+    pub hidden_files: Option<u64>,
+}
+
 /// 完整报告（JSON 输出）。
 #[derive(Serialize)]
 pub struct JsonReport {
@@ -66,6 +75,8 @@ pub struct JsonReport {
     pub editable_warning_groups: usize,
     /// 读取失败、未参与比对的文件。
     pub unreadable_files: Vec<String>,
+    /// 被跳过的 reparse point 及其遮蔽的文件数。
+    pub reparse_points: Vec<ReparsePointReport>,
     pub groups: Vec<GroupReport>,
     pub execution: Option<ExecutionReport>,
 }
@@ -116,13 +127,29 @@ pub fn print_groups<W: Write>(
     for (position, group) in groups.iter().take(shown).enumerate() {
         let index = position + 1;
         let pending = group.pending().len();
+        let linked = group.already_linked().len();
+        // 📌【2026-10-31】×N 是"组内成员总数"，不是"待转换数"。
+        // 早前版本写的是待转换数+1，导致整组已链接的组显示成 ×1，
+        // 读者会以为这组只有一份文件——而它可能已经占着好几份磁盘。
         writeln!(
             out,
             "  {:>4}. {} {}",
             style(format!("{index}")).bold(),
-            style(format!("[{:>9} ×{}]", human_size(group.size), pending + 1)).cyan(),
+            style(format!(
+                "[{:>9} ×{}]",
+                human_size(group.size),
+                group.members.len()
+            ))
+            .cyan(),
             style(group.keeper().name()).bold()
         )?;
+        if linked > 0 && pending > 0 {
+            writeln!(
+                out,
+                "        {}",
+                style(format!("{pending} 份待转换 · {linked} 份已是硬链接")).dim()
+            )?;
+        }
         writeln!(
             out,
             "        {} {}",
@@ -169,21 +196,79 @@ pub fn print_summary<W: Write>(out: &mut W, groups: &[DuplicateGroup]) -> std::i
         .iter()
         .map(|group| group.already_linked().len())
         .sum::<usize>();
+    let members: usize = groups.iter().map(|group| group.members.len()).sum();
 
     writeln!(out, "{}", style("─".repeat(64)).dim())?;
     writeln!(
         out,
-        "重复组 {} 组 / 冗余副本 {} 份 / 可回收 {}",
+        "重复组 {} 组 / 成员 {} 份 / 可回收 {}",
         style(groups.len().to_string()).bold(),
-        style(redundant.to_string()).bold(),
+        style(members.to_string()).bold(),
         style(human_size(reclaimable)).bold().green()
     )?;
-    if already > 0 {
+    writeln!(
+        out,
+        "  待转换 {} 份 · 已是硬链接 {} 份（无需处理）",
+        style(redundant.to_string()).bold(),
+        style(already.to_string()).dim()
+    )?;
+    writeln!(out, "{}", style("─".repeat(64)).dim())?;
+    Ok(())
+}
+
+/// 打印被跳过的 reparse point 及其遮蔽的文件数。
+///
+/// 📌【2026-10-31】符号链接与目录联接不参与去重是对的（避免越出扫描根与重复计数），
+/// 但只写"跳过 5 个符号链接"会让人以为整棵树都扫到了。这里把被遮蔽的体量摊开。
+pub fn print_reparse_summary<W: Write>(
+    out: &mut W,
+    root: &Path,
+    reparse_points: &[scan::ReparsePoint],
+) -> std::io::Result<()> {
+    if reparse_points.is_empty() {
+        return Ok(());
+    }
+    let hidden: u64 = reparse_points
+        .iter()
+        .filter_map(|reparse| reparse.hidden_files)
+        .sum();
+
+    writeln!(out, "{}", style("─".repeat(64)).dim())?;
+    writeln!(
+        out,
+        "{}",
+        style(format!(
+            "跳过 {} 个 reparse point（符号链接 / 目录联接），其目标合计约 {} 个文件未参与扫描",
+            reparse_points.len(),
+            hidden
+        ))
+        .yellow()
+    )?;
+    writeln!(
+        out,
+        "  {}",
+        style("不同目标之间可能重叠，因此合计值可能大于实际未扫描的文件数").dim()
+    )?;
+    for reparse in reparse_points {
+        let target = match &reparse.target {
+            Some(target) => target.display().to_string(),
+            None => "目标无法解析".to_string(),
+        };
         writeln!(
             out,
-            "其中 {} 份已经是硬链接，无需处理",
-            style(already.to_string()).dim()
+            "  {} {}",
+            style("·").dim(),
+            style(short_path(root, &reparse.path)).bold()
         )?;
+        writeln!(out, "      {} {}", style("→").dim(), style(target).dim())?;
+        if let Some(count) = reparse.hidden_files {
+            writeln!(
+                out,
+                "      {} {}",
+                style("遮蔽").dim(),
+                style(format!("{count} 个文件")).dim()
+            )?;
+        }
     }
     writeln!(out, "{}", style("─".repeat(64)).dim())?;
     Ok(())

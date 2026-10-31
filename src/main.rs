@@ -228,6 +228,7 @@ fn run(args: Args) -> Result<Outcome> {
 
     report::print_groups(&mut human, &groups, &root, args.max_listed)?;
     report::print_summary(&mut human, &groups)?;
+    report::print_reparse_summary(&mut human, &root, &outcome.reparse_points)?;
     report::print_editable_warning(&mut human, &groups)?;
 
     if groups.is_empty() {
@@ -478,6 +479,18 @@ fn emit_json(
         unreadable_files: digest_failed
             .iter()
             .map(|(path, reason)| format!("{}: {}", path.display(), reason))
+            .collect(),
+        reparse_points: outcome
+            .reparse_points
+            .iter()
+            .map(|reparse| report::ReparsePointReport {
+                path: reparse.path.display().to_string(),
+                target: reparse
+                    .target
+                    .as_ref()
+                    .map(|target| target.display().to_string()),
+                hidden_files: reparse.hidden_files,
+            })
             .collect(),
         groups: group_reports,
         execution,
