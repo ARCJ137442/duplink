@@ -16,15 +16,20 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # bin   = cargo 产出的文件名（由包名决定）
+          # asset = 发布到 Release 时的文件名（必须唯一，否则多平台会互相覆盖）
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact: duplink.exe
+            bin: duplink.exe
+            asset: duplink-windows-x86_64.exe
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            artifact: duplink
+            bin: duplink
+            asset: duplink-linux-x86_64
           - os: macos-latest
             target: aarch64-apple-darwin
-            artifact: duplink-macos-arm64
+            bin: duplink
+            asset: duplink-macos-arm64
     steps:
       - uses: actions/checkout@v4
 
@@ -40,11 +45,18 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }}
         shell: bash
 
+      - name: 整理产物
+        run: |
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/release/${{ matrix.bin }}" "dist/${{ matrix.asset }}"
+          ls -l dist
+        shell: bash
+
       - name: 收集产物
         uses: actions/upload-artifact@v4
         with:
           name: duplink-${{ matrix.target }}
-          path: target/${{ matrix.target }}/release/${{ matrix.artifact }}
+          path: dist/${{ matrix.asset }}
           if-no-files-found: error
 
   publish:
@@ -58,19 +70,22 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: 创建 Release
+      - name: 发布 Release
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
-          generate_release_notes: true
+          fail_on_unmatched_files: true
           body: |
             ## duplink ${{ github.ref_name }}
 
             重复文件检测与硬链接合并工具。
 
-            - Windows: `duplink.exe`
-            - Linux (x86_64): `duplink`
-            - macOS (Apple Silicon): `duplink-macos-arm64`
+            | 平台 | 文件 |
+            |------|------|
+            | Windows x86_64 | `duplink-windows-x86_64.exe` |
+            | Linux x86_64 | `duplink-linux-x86_64` |
+            | macOS Apple Silicon | `duplink-macos-arm64` |
 
-            完整说明见 [README](https://github.com/ARCJ137442/duplink#readme)。
-            变更记录见 [CHANGELOG.md](https://github.com/ARCJ137442/duplink/blob/main/CHANGELOG.md)。
+            完整说明见 [README](https://github.com/ARCJ137442/duplink#readme)，
+            变更记录见 [CHANGELOG.md](https://github.com/ARCJ137442/duplink/blob/main/CHANGELOG.md)，
+            设计原理见 [docs/design.md](https://github.com/ARCJ137442/duplink/blob/main/docs/design.md)。

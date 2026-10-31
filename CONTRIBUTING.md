@@ -80,18 +80,33 @@ fix(report): 修正 ×N 显示语义
 
 ## 发布
 
-维护者负责打 tag 与发布 Release，流程：
+维护者负责打 tag。**打完 tag 不要再手动 `gh release create`** —— tag 推送后
+GitHub Actions 的 `release.yml` 会自动构建三个平台的二进制并创建/更新 Release，
+手动创建会和它抢同一个 release。
 
 ```bash
-# 1. 更新 CHANGELOG.md，把 [未发布] 改成版本号与日期
+# 1. 更新 CHANGELOG.md：把 [未发布] 的内容改成版本号与日期
 # 2. 更新 Cargo.toml 的 version
 cargo build --release
 cargo test
-git tag -a v0.2.3 -m "v0.2.3"      # 说明用文件传，避免 shell 引号问题
-git push origin main --tags
-gh release create v0.2.3 --title "..." --notes-file CHANGELOG.md \
-   "target/release/duplink.exe#duplink.exe (Windows x64)"
+cargo fmt --check
+cargo clippy --all-targets
+
+# 3. 提交并打 tag
+git add -A
+git commit -m "release: v0.2.3"
+git tag -a v0.2.3 -F RELEASE_NOTES.txt   # 说明用文件传，避免 shell 引号问题
+git push origin main --follow-tags
 ```
+
+tag 推送后 `release.yml` 会：
+
+1. 在 Ubuntu / Windows / macOS 上分别构建
+2. 收集 `duplink-windows-x86_64.exe`、`duplink-linux-x86_64`、`duplink-macos-arm64`
+3. 创建或更新对应的 Release 并附上这三个文件
+
+> 平台矩阵里的 `bin`（cargo 产出名，由包名决定）与 `asset`（发布名，必须唯一）
+> 是两回事。早期版本把两者混用，导致 macOS 那份找不到文件、整个工作流失败。
 
 ---
 
