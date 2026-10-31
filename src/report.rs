@@ -291,10 +291,12 @@ pub fn print_editable_warning<W: Write>(
     if affected.is_empty() {
         return Ok(());
     }
-    let linked: usize = affected
+    // 待转换为空的组 = 成员已全部共享同一份数据（此刻就在互相影响）。
+    let with_pending: usize = affected
         .iter()
         .filter(|group| !group.pending().is_empty())
         .count();
+    let fully_linked = affected.len() - with_pending;
     writeln!(
         out,
         "{}",
@@ -310,9 +312,7 @@ pub fn print_editable_warning<W: Write>(
     )?;
     writeln!(
         out,
-        "   其中 {} 组已是硬链接（现在就在共享数据），{} 组仍有待转换的副本。",
-        affected.len() - linked,
-        linked
+        "   其中 {fully_linked} 组已是硬链接（现在就在共享数据），{with_pending} 组仍有待转换的副本。",
     )?;
     Ok(())
 }

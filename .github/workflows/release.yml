@@ -1,0 +1,76 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: 构建 ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: duplink.exe
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: duplink
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: duplink-macos-arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Rust stable
+        run: rustup toolchain install stable --profile minimal --no-self-update
+        shell: bash
+
+      - name: 安装交叉编译目标
+        run: rustup target add ${{ matrix.target }}
+        shell: bash
+
+      - name: 构建
+        run: cargo build --release --target ${{ matrix.target }}
+        shell: bash
+
+      - name: 收集产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: duplink-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/${{ matrix.artifact }}
+          if-no-files-found: error
+
+  publish:
+    name: 发布到 GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: 下载全部产物
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: 创建 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          body: |
+            ## duplink ${{ github.ref_name }}
+
+            重复文件检测与硬链接合并工具。
+
+            - Windows: `duplink.exe`
+            - Linux (x86_64): `duplink`
+            - macOS (Apple Silicon): `duplink-macos-arm64`
+
+            完整说明见 [README](https://github.com/ARCJ137442/duplink#readme)。
+            变更记录见 [CHANGELOG.md](https://github.com/ARCJ137442/duplink/blob/main/CHANGELOG.md)。

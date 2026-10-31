@@ -50,10 +50,10 @@ pub fn parse_selection(input: &str, groups: &[DuplicateGroup]) -> Result<Selecti
         match token {
             "safe" | "安全" => {
                 for (index, group) in groups.iter().enumerate() {
-                    let risky = group
-                        .pending()
-                        .iter()
-                        .any(|member| is_editable(&member.path));
+                    // 📌【2026-10-31】按组内**全部**成员判定，而不是只看待转换的成员。
+                    // 报告里的警告也是按全部成员圈定的组；两处必须一致，
+                    // 否则用户用 safe 规避的组与警告提示的组对不上。
+                    let risky = group.members.iter().any(|member| is_editable(&member.path));
                     if !risky {
                         selected.push(index);
                     }
@@ -210,6 +210,28 @@ mod tests {
         let list = groups();
         match parse_selection("safe", &list).unwrap() {
             Selection::Indices(indices) => assert_eq!(indices, vec![0, 2]),
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn safe_and_warning_agree_on_which_groups_are_editable() {
+        // safe 排除的组必须与警告提示的组完全一致：用户用 safe 规避的，
+        // 正是报告里点名的那批。
+        let list = groups();
+        let editable_groups: Vec<usize> = list
+            .iter()
+            .enumerate()
+            .filter(|(_, group)| group.members.iter().any(|member| is_editable(&member.path)))
+            .map(|(index, _)| index)
+            .collect();
+        match parse_selection("safe", &list).unwrap() {
+            Selection::Indices(indices) => {
+                let excluded: Vec<usize> = (0..list.len())
+                    .filter(|index| !indices.contains(index))
+                    .collect();
+                assert_eq!(excluded, editable_groups);
+            }
             other => panic!("unexpected {other:?}"),
         }
     }

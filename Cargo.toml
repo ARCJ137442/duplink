@@ -1,6 +1,6 @@
 ﻿[package]
 name = "duplink"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 
 [dependencies]
@@ -20,4 +20,5 @@ same-file = "1.0"                                  # 跨平台文件身份（硬
 opt-level = 3
 lto = true
 strip = true
+
 
