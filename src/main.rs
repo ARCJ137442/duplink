@@ -461,7 +461,7 @@ fn emit_json(
                 .map(|member| member.path.display().to_string())
                 .collect(),
             editable: group
-                .pending()
+                .members
                 .iter()
                 .any(|member| model::is_editable(&member.path)),
         })

@@ -275,22 +275,26 @@ pub fn print_reparse_summary<W: Write>(
 }
 
 /// 打印"原地编辑会互相影响"的提示。
+///
+/// 📌【2026-10-31】必须检查组内**全部**成员，而不是只看待转换的成员。
+/// 已经建立硬链接的组恰恰是最需要警告的：它们的成员共享同一份数据，
+/// 原地编辑会立刻反映到其它路径——而这类组的待转换成员恰好是空的，
+/// 只看 pending 会把它们整批漏报。
 pub fn print_editable_warning<W: Write>(
     out: &mut W,
     groups: &[DuplicateGroup],
 ) -> std::io::Result<()> {
     let affected: Vec<&DuplicateGroup> = groups
         .iter()
-        .filter(|group| {
-            group
-                .pending()
-                .iter()
-                .any(|member| is_editable(&member.path))
-        })
+        .filter(|group| group.members.iter().any(|member| is_editable(&member.path)))
         .collect();
     if affected.is_empty() {
         return Ok(());
     }
+    let linked: usize = affected
+        .iter()
+        .filter(|group| !group.pending().is_empty())
+        .count();
     writeln!(
         out,
         "{}",
@@ -302,7 +306,13 @@ pub fn print_editable_warning<W: Write>(
     )?;
     writeln!(
         out,
-        "   转为硬链接后原地编辑其中一个，会同步改变其它路径。可用 safe 选项排除。",
+        "   这些文件的多个路径共享同一份数据：原地编辑其中一个，会同步改变其它路径。"
+    )?;
+    writeln!(
+        out,
+        "   其中 {} 组已是硬链接（现在就在共享数据），{} 组仍有待转换的副本。",
+        affected.len() - linked,
+        linked
     )?;
     Ok(())
 }
